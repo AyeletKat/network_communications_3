@@ -64,20 +64,17 @@ TCP_Receiver.o: TCP_Receiver.c
 	$(CC) $(CFLAGS) -c TCP_Receiver.c
 
 # RUDP targets
-RUDP_Sender: RUDP_Sender.o RUDP_API.o
-	$(CC) $(CFLAGS) -o RUDP_Sender RUDP_Sender.o RUDP_API.o
+RUDP_Receiver: RUDP_Receiver.o 
+	$(CC) $(CFLAGS) -o RUDP_Receiver RUDP_Receiver.o
 
-RUDP_Receiver: RUDP_Receiver.o RUDP_API.o
-	$(CC) $(CFLAGS) -o RUDP_Receiver RUDP_Receiver.o RUDP_API.o
+RUDP_Sender: RUDP_Sender.o 
+	$(CC) $(CFLAGS) -o RUDP_Sender RUDP_Sender.o
 
-RUDP_Sender.o: RUDP_Sender.c RUDP_API.h
-	$(CC) $(CFLAGS) -c RUDP_Sender.c
-
-RUDP_Receiver.o: RUDP_Receiver.c RUDP_API.h
+RUDP_Receiver.o: RUDP_Receiver.c RUDP_API.c
 	$(CC) $(CFLAGS) -c RUDP_Receiver.c
 
-RUDP_API.o: RUDP_API.c RUDP_API.h
-	$(CC) $(CFLAGS) -c RUDP_API.c
+RUDP_Sender.o: RUDP_Sender.c RUDP_API.c
+	$(CC) $(CFLAGS) -c RUDP_Sender.c
 
 # Clean up generated files
 clean:

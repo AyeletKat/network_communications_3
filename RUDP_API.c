@@ -1,192 +1,170 @@
-# include "RUDP_API.h"
-# include <time.h>
-  /* * @brief A random data generator function based on srand() and rand(). 
-  * @param size The size of the data to generate (up to 2^32 bytes). 
-  * @return A pointer to the buffer. */ 
- // CONTAINS CALLOC! NEEDS TO BE FREED
-char* util_generate_random_data(unsigned int size) { 
-   char *buffer = NULL; 
-   if (size == 0) return NULL; // Argument check. 
-   buffer = (char *)calloc(size, sizeof(char));  
-   if (buffer == NULL) return NULL;  // Error checking.
-   srand(time(NULL)); // Randomize the seed of the random number generator.
-   for (unsigned int i = 0; i < size; i++) {*(buffer + i) = ((unsigned int)rand() % 256);}
-   return buffer; 
-}
-// rudp_socket_t* rudp_socket(int port) {
-//     rudp_socket_t* sock = (rudp_socket_t*)malloc(sizeof(rudp_socket_t));
-//     sock->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    
-//     if (sock->sockfd < 0) {
-//         perror("Socket creation failed");
-//         exit(EXIT_FAILURE);
-//     }
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <time.h>
+#include <sys/time.h>
 
-//     memset(&sock->addr, 0, sizeof(sock->addr));
-//     sock->addr.sin_family = AF_INET;
-//     sock->addr.sin_addr.s_addr = INADDR_ANY;
-//     sock->addr.sin_port = htons(port);
+#define MAX_PAYLOAD_SIZE 1024
+#define FILESIZE 2100000 // 2MB = 2^21 bytes = 2097152 bytes. therefore buffer is rounded up to be more then 2MB as required
+#define TIMEOUT_SEC 2
+#define MAX_RETRIES 3
 
-//     if (bind(sock->sockfd, (const struct sockaddr*)&sock->addr, sizeof(sock->addr)) < 0) {
-//         perror("Bind failed");
-//         exit(EXIT_FAILURE);
-//     }
+// different packets flags defining:
+#define REGFLAG 0x01
+#define SYNFLAG 0x02
+#define ACKFLAG 0x03
+#define FIN 0x04
 
-//     return sock;
-// }
 
-rudp_socket_t* rudp_socket(int port) {
-    rudp_socket_t* sock = (rudp_socket_t*)malloc(sizeof(rudp_socket_t));
-    sock->sockfd = socket(AF_INET, SOCK_DGRAM, 0);  // Create a UDP socket
-    
-    if (sock->sockfd < 0) {
-        perror("Socket creation failed");
-        exit(EXIT_FAILURE);
-    }
-
-    memset(&sock->addr, 0, sizeof(sock->addr));
-    sock->addr.sin_family = AF_INET;
-    sock->addr.sin_addr.s_addr = INADDR_ANY;
-    sock->addr.sin_port = htons(port);
-
-    if (bind(sock->sockfd, (const struct sockaddr*)&sock->addr, sizeof(sock->addr)) < 0) {
-        perror("Bind failed");
-        exit(EXIT_FAILURE);
-    }
-
-    // Handshake process
-    if (port == 0) {  // Sender's side
-        struct sockaddr_in receiver_addr;
-        memset(&receiver_addr, 0, sizeof(receiver_addr));
-        receiver_addr.sin_family = AF_INET;
-        receiver_addr.sin_port = htons(0);  // Placeholder port
-        receiver_addr.sin_addr.s_addr = INADDR_ANY;
-
-        rudp_packet_t handshake_packet;
-        handshake_packet.type = RUDP_DATA;  // Indicating handshake start
-        handshake_packet.seq_num = 0;
-        strcpy(handshake_packet.data, "HANDSHAKE_INIT");
-        handshake_packet.checksum = calculate_checksum(handshake_packet.data, strlen(handshake_packet.data));
-
-        int n;
-        socklen_t addr_len = sizeof(receiver_addr);
-        
-        // Send initial handshake packet
-        sendto(sock->sockfd, &handshake_packet, sizeof(handshake_packet), 0, (const struct sockaddr*)&receiver_addr, addr_len);
-
-        // Wait for acknowledgment from the receiver
-        rudp_packet_t ack_packet;
-        n = recvfrom(sock->sockfd, &ack_packet, sizeof(ack_packet), 0, (struct sockaddr*)&receiver_addr, &addr_len);
-        if (n > 0 && ack_packet.type == RUDP_ACK) {
-            printf("Handshake successful. Communication ready.\n");
-        } else {
-            perror("Handshake failed");
-            exit(EXIT_FAILURE);
-        }
-    } else {  // Receiver's side
-        rudp_packet_t recv_packet;
-        struct sockaddr_in sender_addr;
-        socklen_t addr_len = sizeof(sender_addr);
-
-        // Receive initial handshake packet
-        int n = recvfrom(sock->sockfd, &recv_packet, sizeof(recv_packet), 0, (struct sockaddr*)&sender_addr, &addr_len);
-        if (n > 0 && recv_packet.type == RUDP_DATA && strcmp(recv_packet.data, "HANDSHAKE_INIT") == 0) {
-            // Send acknowledgment
-            rudp_packet_t ack_packet;
-            ack_packet.type = RUDP_ACK;
-            ack_packet.seq_num = recv_packet.seq_num;
-            strcpy(ack_packet.data, "HANDSHAKE_ACK");
-            ack_packet.checksum = calculate_checksum(ack_packet.data, strlen(ack_packet.data));
-
-            sendto(sock->sockfd, &ack_packet, sizeof(ack_packet), 0, (struct sockaddr*)&sender_addr, addr_len);
-            printf("Handshake successful. Communication ready.\n");
-        } else {
-            perror("Handshake failed");
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    return sock;
+char *util_generate_random_data(unsigned int size) {
+    char *buffer = NULL;
+    // Argument check.
+    if (size == 0)
+    return NULL;
+    buffer = (char *)calloc(size, sizeof(char));
+    // Error checking.
+    if (buffer == NULL)
+    return NULL;
+    // Randomize the seed of the random number generator.
+    srand(time(NULL));
+    for (unsigned int i = 0; i < size; i++)
+    *(buffer + i) = ((unsigned int)rand() % 256);
+    return buffer;
 }
 
-int rudp_send(rudp_socket_t* sock, const char* ip, int port, const void* data, size_t len) {
-    struct sockaddr_in dest_addr;
-    memset(&dest_addr, 0, sizeof(dest_addr));
-    dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip, &dest_addr.sin_addr);
+struct RUDP_Header {
+    uint16_t length;  // Length of the packet
+    uint16_t checksum; // Checksum for error detection
+    uint8_t flags;    // Flags for various control information 
+    char value[MAX_PAYLOAD_SIZE];      // Data payload
+};
 
-    rudp_packet_t packet;
-    packet.type = RUDP_DATA;
-    packet.seq_num = 0;
-    memcpy(packet.data, data, len);
-    packet.checksum = calculate_checksum(data, len);
+// Function to build an RUDP packet with data
+void packetConstruct(struct RUDP_Header *header, char *data, uint16_t dataLength, uint16_t checksum, uint8_t flags) {
+    header->length = htons(sizeof(struct RUDP_Header)); // Total length of packet
+    header->checksum = htons(checksum); // Convert checksum to network byte order
+    header->flags = flags; // 8 bit single byte no need for htons conversion
+    memcpy(header->value, data, dataLength);
+}
 
+int send_receiveAck(int sockfd, struct sockaddr_in *addr, int isSend) {
+    struct RUDP_Header ackHeader;
+
+    if (isSend) {
+        packetConstruct(&ackHeader, "ACK", sizeof("ACK"), 0, ACKFLAG);
+        if (sendto(sockfd, &ackHeader, sizeof(ackHeader), 0, (const struct sockaddr *)addr, sizeof(*addr)) < 0) {
+            perror("sendto failed");
+            return -1;
+        }
+        printf("Acknowledge sent.\n");
+    } else {
+        struct timeval timeout;
+        timeout.tv_sec = TIMEOUT_SEC;
+        timeout.tv_usec = 0;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
+
+        char ackBuffer[sizeof(struct RUDP_Header)];
+        socklen_t addrLen = sizeof(*addr);
+        int numBytesReceived = recvfrom(sockfd, ackBuffer, sizeof(ackBuffer), 0, (struct sockaddr *)addr, &addrLen);
+        if (numBytesReceived < 0) {
+            printf("Acknowledge not received. Retransmitting...\n");
+            return 0; // Acknowledge not received
+        }
+        printf("Acknowledge received.\n");
+    }
+
+    return 1; // Acknowledge sent or received successfully
+}
+
+int performHandshake(int sockfd, struct sockaddr_in *serverAddr) {
+    struct RUDP_Header handshakePacket;
+
+    // Send handshake packet to the receiver
+    packetConstruct(&handshakePacket, "SYN", sizeof("SYN"), 0, SYNFLAG); 
+    if (sendto(sockfd, &handshakePacket, ntohs(handshakePacket.length), 0, (const struct sockaddr *)serverAddr, sizeof(*serverAddr)) < 0) {
+        perror("sendto failed");
+        return -1; // Error sending handshake packet
+    }
+    printf("Handshake packet sent.\n");
+
+    // Wait for acknowledgment from the receiver
+    if (!send_receiveAck(sockfd, serverAddr, 0)) {
+        printf("Acknowledgment for handshake not received. Handshake failed.\n");
+        return 0; // Handshake failed
+    }
+
+    send_receiveAck(sockfd, serverAddr,1);//sendind ack
+
+    printf("Handshake successful.\n");
+    return 1; // Handshake successful
+}
+
+
+int receiveHandshake(int sockfd, struct sockaddr_in *clientAddr) {
+    struct RUDP_Header handshakePacket;
+
+    // Wait for handshake packet from the sender
+    socklen_t clientAddrLen = sizeof(*clientAddr);
+    int numBytesReceived = recvfrom(sockfd, &handshakePacket, sizeof(handshakePacket), 0, (struct sockaddr *)clientAddr, &clientAddrLen);
+    if (numBytesReceived < 0) {
+        perror("recvfrom failed");
+        return -1; // Error receiving handshake packet
+    }
+
+    // Send acknowledgment back to the sender
+    send_receiveAck(sockfd, clientAddr,1); // sending ack
+
+    printf("Handshake packet received and acknowledged.\n");
+    printf("Waiting for acknowledgment...\n");
+    if(!send_receiveAck(sockfd, clientAddr,0)) {
+        printf("Acknowledgment for handshake not received. Handshake failed.\n");
+        return 0; // Handshake failed
+    }
+    return 1; // Handshake successful
+}
+
+int rudp_socket() {
+    int sockfd;
+
+    // Create UDP socket
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        perror("socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+    return sockfd;
+}
+void rudp_close(int sockfd) {
+    close(sockfd);
+}
+
+void rudp_send(int sockfd, struct sockaddr_in *serverAddr, struct RUDP_Header *packetHeader) {
     int retries = 0;
     while (retries < MAX_RETRIES) {
-        sendto(sock->sockfd, &packet, sizeof(packet), 0, (const struct sockaddr*)&dest_addr, sizeof(dest_addr));
-
-        struct timeval tv;
-        tv.tv_sec = TIMEOUT;
-        tv.tv_usec = 0;
-        setsockopt(sock->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-        rudp_packet_t ack;
-        socklen_t addr_len = sizeof(dest_addr);
-        int n = recvfrom(sock->sockfd, &ack, sizeof(ack), 0, (struct sockaddr*)&dest_addr, &addr_len);
-
-        if (n > 0 && ack.type == RUDP_ACK && ack.seq_num == packet.seq_num) {
-            return 0; // Success
+        if (sendto(sockfd, packetHeader, ntohs(packetHeader->length), 0, (const struct sockaddr *)serverAddr, sizeof(*serverAddr)) < 0) {
+            perror("sendto failed");
+            exit(EXIT_FAILURE);
         }
-
+        printf("Packet sent.\n");
+        if (send_receiveAck(sockfd, serverAddr,0)) {
+            break; // Packet sent successfully
+        }
         retries++;
     }
-
-    return -1; // Failure
 }
 
-int rudp_recv(rudp_socket_t* sock, void* buffer, size_t len) {
-    rudp_packet_t packet;
-    struct sockaddr_in sender_addr;
-    socklen_t addr_len = sizeof(sender_addr);
-
-    int n = recvfrom(sock->sockfd, &packet, sizeof(packet), 0, (struct sockaddr*)&sender_addr, &addr_len);
-
-    if (n > 0 && packet.type == RUDP_DATA) {
-        uint16_t checksum = calculate_checksum(packet.data, len);
-        if (checksum == packet.checksum) {
-            memcpy(buffer, packet.data, len);
-
-            // Send ACK
-            rudp_packet_t ack;
-            ack.type = RUDP_ACK;
-            ack.seq_num = packet.seq_num;
-            sendto(sock->sockfd, &ack, sizeof(ack), 0, (const struct sockaddr*)&sender_addr, addr_len);
-
-            return n;
-        }
+uint16_t rudp_recv(int sockfd, struct sockaddr_in *clientAddr, struct RUDP_Header *packetHeader) {
+    socklen_t clientAddrLen = sizeof(*clientAddr);
+    int numBytesReceived = recvfrom(sockfd, packetHeader, sizeof(*packetHeader), 0, (struct sockaddr *)clientAddr, &clientAddrLen);
+    if (numBytesReceived < 0) {
+        perror("recvfrom failed");
+  
+        return 0xFFFF; // Error receiving packet
+        //exit(EXIT_FAILURE);
     }
-
-    return -1;
-}
-
-void rudp_close(rudp_socket_t* sock) {
-    close(sock->sockfd);
-    free(sock);
-}
-
-uint16_t calculate_checksum(const void* data, size_t len) {
-    uint16_t* ptr = (uint16_t*)data;
-    uint32_t sum = 0;
-    while (len > 1) {
-        sum += *ptr++;
-        len -= 2;
-    }
-    if (len > 0) {
-        sum += *(uint8_t*)ptr;
-    }
-    while (sum >> 16) {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    return (uint16_t)~sum;
+    printf("Packet received.\n");
+    printf("Packet checksum: %d\n", ntohs(packetHeader->checksum));
+    return ntohs(packetHeader->checksum);
 }
