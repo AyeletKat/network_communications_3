@@ -78,5 +78,4 @@ RUDP_Sender.o: RUDP_Sender.c RUDP_API.c
 
 # Clean up generated files
 clean:
-	rm -f *.o TCP_Sender TCP_Receiver RUDP_Sender RUDP_Receiver
-
+	rm -f *.o *.txt TCP_Sender TCP_Receiver RUDP_Sender RUDP_Receiver
