@@ -11,7 +11,7 @@
 #include <time.h>
 
 //#define MAX_SIZE 1024
-#define FILE_BUFFER_SIZE 2100000 // 2MB = 2^21 bytes = 2097152 bytes. therefore buffer is rounded up to be more then 2MB as required
+#define FILE_BUFFER_SIZE 2097153 // 2MB = 2^21 bytes = 2097152 bytes. therefore buffer is rounded up to be more then 2MB as required
 
   /* * @brief A random data generator function based on srand() and rand(). 
   * @param size The size of the data to generate (up to 2^32 bytes). 

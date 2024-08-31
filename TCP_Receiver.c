@@ -9,14 +9,12 @@
 #include <netinet/tcp.h>
 #include <netdb.h>
 #include <time.h>
+#include <sys/time.h>
 
-#define BUFFER_SIZE 1024
+#define MAX_SIZE 1024
+#define BUFFER_SIZE 2097153
 
-//void error(const char *msg) {
-//    perror(msg);
-//    return 1;
-//}
-
+void print_stats(struct timeval start, struct timeval end, int totalReceived);
 int main(int argc, char *argv[]) {
     if (argc < 5) {
         fprintf(stderr, "Usage: %s -p <PORT> -algo <ALGO>\n", argv[0]);
@@ -80,11 +78,84 @@ int main(int argc, char *argv[]) {
         close(client_sender_soc);
         return 1;
     }
-    ////while()
-    ////recieve file and make stats
-    //clock_t start, end;
-    //start = clock();
-    ////while()//read file
-    //end = clock();
+    int totalReceived = 0;
+    int counter = 1;
+    struct timeval start, end;
+    char filename[40];
+    sprintf(filename, "received%d.txt", counter);
+    FILE *file = fopen(filename, "w");
+        
 
+    if (file == NULL) {
+        perror("Error opening file");
+        close(client_sender_soc);
+        close(soc);
+        return 1;
+    }
+
+    char buffer[BUFFER_SIZE];
+    
+    int bytesRead;
+    int onerecv = 0;
+    int currentsize = BUFFER_SIZE;
+    if(BUFFER_SIZE % MAX_SIZE != 0)
+    {
+        currentsize = BUFFER_SIZE+MAX_SIZE;
+    }
+    gettimeofday(&start, NULL);
+    while ((bytesRead = recv(client_sender_soc, buffer, sizeof(buffer), 0)) > 0) {
+        if (onerecv > currentsize - MAX_SIZE)
+        {         
+            counter++;
+            sprintf(filename, "received%d.txt", counter);
+            fclose(file);
+            onerecv = 0;
+            
+        }
+        if (onerecv == 0 && bytesRead>0)
+        {
+            
+            file = fopen(filename, "w");
+            if (file == NULL) {
+                perror("Error opening file");
+                close(client_sender_soc);
+                close(soc);
+                return 1;
+            }
+        }
+        fwrite(buffer, sizeof(char), bytesRead, file);
+        totalReceived += bytesRead;
+        onerecv += bytesRead;
+        printf("Received %d bytes\n", onerecv);
+        
+    }
+
+    if (bytesRead < 0) {
+        perror("Receive failed");
+    }
+    printf("Data received and written\n");
+
+    printf("Total received: %d bytes\n", totalReceived);
+    fclose(file);
+
+    gettimeofday(&end, NULL);
+    print_stats(start, end, totalReceived);
+    close(client_sender_soc);
+    close(soc);
+
+    return 0;
+}
+void print_stats(struct timeval start, struct timeval end, int totalReceived) {
+    double time_taken = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6;
+    double bandwidth = (totalReceived / 1024.0) / time_taken; 
+    static double avgBandwidth = 0;
+    avgBandwidth += bandwidth;
+    static double avgTime = 0;
+    avgTime += time_taken;
+    static int counter = 0;
+    printf("Time taken: %.2f seconds\n", time_taken);
+    printf("Average Bandwidth: %.2f KB/s\n", bandwidth);
+    printf("--------------------------------\n");
+    printf("Average Time: %.2f seconds\n", avgTime / ++counter);
+    printf("Average Bandwidth: %.2f KB/s\n", avgBandwidth / counter);
 }
